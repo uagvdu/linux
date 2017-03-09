@@ -1,0 +1,87 @@
+service.c 
+
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<assert.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+
+int mysocket(int _port,const char* _ip)
+{
+     //获取套接字：tcp建立连接的两个断点是套接字
+     int mysockfd= socket(AF_INET,SOCK_STREAM,0);//返回是一个套接字文件描述符
+     if(mysocket < 0)
+     {
+          perror("create failed\n");
+          exit(1);
+
+     }
+
+     struct sockaddr_in server_socket;
+     server_socket.sin_family = AF_INET;
+     server_socket.sin_port = htons(_port);
+     server_socket.sin_addr.s_addr=inet_addr(_ip);
+     socklen_t len =sizeof(server_socket);
+
+     if(bind(mysockfd,(struct sockaddr*)&server_socket,len)<0)
+     {
+          perror("bind failed\n");
+          exit(-2);
+     }
+
+     if(listen(mysockfd,5)<0)
+     {
+          perror("listen failed\n");
+          exit(-3);
+     }
+
+     return mysockfd;
+
+}
+int main(int argc,char* argv[])
+{
+     if(argc!=3)
+     {
+          printf("Usage: %s [local_ip ][local_port]\n",argv[0]);
+          return 4;
+     }
+
+     //获取监听套接字
+     int listen_sock = mysocket(atoi(argv[2]),argv[1]); 
+
+     struct sockaddr_in client_socket;
+     socklen_t len= sizeof(struct sockaddr_in);
+
+     while(1)
+     {
+          int link_sock=accept(listen_sock,(struct sockaddr*)&client_socket,&len);
+
+          if(link_sock <0)
+          {
+              perror("accept error\n");
+              continue;
+          }
+          printf("get a client,ip:%s,port:%d\n",inet_ntoa(client_socket.sin_addr),ntohs(client_socket.sin_port));
+
+          char buf[1024];
+          while(1)
+          {
+              ssize_t s= read(link_sock,buf,sizeof(buf)-1);
+              if(s >0)
+              {
+                   buf[s] = 0;
+                   printf("client #%s\n",buf);
+              }
+              else
+              {
+                   printf("client is quit\n");
+                   break;
+              }
+          }
+          close(link_sock);
+}
+          return 0 ;
+}
