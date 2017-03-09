@@ -71,8 +71,7 @@ struct sockaddr
      返回值：
                     成功返回0，失败返回-1
 
-
-3.  listen()：
+3.listen()：
          函数原型：int listen(int sockfd,int backlog);
          作用：仅被TCP服务器调用，声明sockfd处于监听状态，并且最多有backlog个客户端处于连接等待状态，
          返回值：成功返回0，失败返回-1；
@@ -126,7 +125,7 @@ struct sockaddr
       其中inet_pton和inet_ntop不仅可以转换IPv4的in_addr,还可以转换IPv6的in6_addr,因此函数接口是void *addrptr
 
 
-8. connect()：
+8.connect()：
      函数原型：int connect (int sockfd,const struct sockaddr *addr,socklen_t addrlen)
      作用：客户端调用connect连接服务器
      参数：其参数形式和bind一致，区别在于bind的参数是自己的地址，而connect参数是对方的地址。
