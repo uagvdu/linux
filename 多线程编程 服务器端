@@ -1,0 +1,109 @@
+ 
+
+//tcp 的连接，多线程编程
+//tserver 端
+#include<stdio.h>
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<pthread.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/socket.h>
+#include<sys/types.h>
+
+
+int mysocket(int _port,const char* _ip)
+{
+	int mysockfd= socket(AF_INET,SOCK_STREAM,0);
+	if(mysocket < 0)
+	{
+		perror("create failed\n");
+		exit(2);
+
+	}
+
+	struct sockaddr_in server_socket;
+	server_socket.sin_family = AF_INET;
+	server_socket.sin_port = htons(_port);
+	server_socket.sin_addr.s_addr=inet_addr(_ip);
+	socklen_t len =sizeof(server_socket);
+
+	if(bind(mysockfd,(struct sockaddr*)&server_socket,len)<0)
+	{
+		perror("bind failed\n");
+		exit(3);
+	}
+	
+	if(listen(mysockfd,5)<0)
+	{
+		perror("listen failed\n");
+		exit(4);
+	}
+	
+	return mysockfd;
+}
+
+
+ 
+void* new_pthread(void*  arg)
+{
+ //使得主线程和新线程分离，在主线程退出后，新线程能够继续运行
+ pthread_detach(pthread_self());
+ 
+	int link_sock= *((int*)arg);	
+	char buf[1024];
+	while(1)
+	{
+		ssize_t s = read(link_sock,buf,sizeof(buf)-1);
+
+		if(s > 0)
+		{
+			buf[s-1] = 0;
+			printf("%s\n ",buf);
+		}
+		else
+		{
+			printf("cli quit \n");
+			close(link_sock);
+			break;
+		}
+	}
+}
+
+int main(int argc,char * argv[])
+{
+
+	if(argc != 3)
+	{
+		printf("Usage: %s [local_ip] [local_port]\n ",argv[0]);
+		return 1;
+	}
+
+	//套接字的创建及初始化
+	int listen_sock = mysocket(atoi(argv[2]),argv[1]);
+
+	while(1)		
+	{
+		struct sockaddr_in clisocket;
+		socklen_t len = sizeof(clisocket);
+		int link_sock = accept(listen_sock,(struct sockaddr*)&clisocket,&len);
+	
+    //新线程的创建必须在accpet函数之后，从而主线程不断接收新连接的请求，新线程执行自己的功能，		
+    if(link_sock <0)
+		{
+			perror("accept failed");
+			return 6;
+		}
+
+		pthread_t tid;
+		int	 errcode = pthread_create(&tid,NULL,new_pthread,&link_sock);
+		printf("get a client: ip:%s port:%d \n",inet_ntoa(clisocket.sin_addr),ntohs(clisocket.sin_port));
+		if(errcode!=0)
+		{
+			perror("pthread create failed\n");
+			exit(5);
+		}
+	}
+	return 0;
+}
+
