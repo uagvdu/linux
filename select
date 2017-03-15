@@ -142,7 +142,7 @@ int main(int argc,char * argv[])
 						if(m != _SIZE_)
 						{
 							gfds[m] = link_sock;
-							FD_SET(link_sock,&rfds);
+							
 						}
 						else{
 							close(link_sock);
