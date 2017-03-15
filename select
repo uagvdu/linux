@@ -1,0 +1,188 @@
+
+
+#include<stdio.h>
+#include<netinet/in.h>
+#include<arpa/inet.h>
+#include<pthread.h>
+#include<stdlib.h>
+#include<string.h>
+#include<sys/socket.h>
+#include<sys/types.h>
+
+#define _SIZE_ 2
+
+//gfds是存放的是文件描述符的数组
+int gfds[_SIZE_];
+
+int mysocket(int _port,const char* _ip)
+{
+	int mysockfd= socket(AF_INET,SOCK_STREAM,0);
+	if(mysocket < 0)
+	{
+		perror("create failed\n");
+		exit(2);
+
+	}
+	int opt =1;
+	int stat = setsockopt(mysockfd,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
+	struct sockaddr_in server_socket;
+	server_socket.sin_family = AF_INET;
+	server_socket.sin_port = htons(_port);
+	server_socket.sin_addr.s_addr=inet_addr(_ip);
+	socklen_t len =sizeof(server_socket);
+
+	if(bind(mysockfd,(struct sockaddr*)&server_socket,len)<0)
+	{
+		perror("bind failed\n");
+		exit(3);
+	}
+	
+	if(listen(mysockfd,5)<0)
+	{
+		perror("listen failed\n");
+		exit(4);
+	}
+	
+	return mysockfd;
+
+}
+
+
+
+int main(int argc,char * argv[])
+{
+
+	if(argc != 3)
+	{
+		printf("Usage: %s [local_ip] [local_port]\n ",argv[0]);
+		return 1;
+	}
+
+	//监听套接字的初始化
+	int listen_sock = mysocket(atoi(argv[2]),argv[1]);
+
+	//全局文件描述符的集合的初始化
+	int i = 0;
+	for(;i<_SIZE_;i++)
+	{
+		gfds[i] = -1;
+	}
+	
+	gfds[0]= listen_sock;
+
+	while(1)		
+	{
+		//select 内部的三个集合，都代表就绪态，：由等待到执行，等待是阻塞态，就绪是准备执行，
+		//select监视文件描述符状态，程序会停在select这里等待，直至被监视的fd发生状态改变
+		//nfds 代表文件描述符的个数：max_fd值+1
+		int j = 0;
+		struct timeval time;
+		time.tv_sec = 5;
+		time.tv_usec = 0;
+		
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		int max_fd = -1;
+
+		for(;j<_SIZE_;j++)
+		{
+
+			if(gfds[j] > 0)
+			{
+				//根据数组内部的文件描述符，找到读集（位图：第一位表示第一个文件描述符）的对应位，设置为1，
+				FD_SET(gfds[j],&rfds);
+			}
+			if(gfds[j] > max_fd)
+			{
+
+				max_fd = gfds[j];
+			}
+		}
+//		switch(select(max_fd+1,&rfds,NULL,NULL,&time))
+		switch(select(max_fd+1,&rfds,NULL,NULL,NULL))
+		{
+
+			case -1://error
+				perror("error:");
+				break;
+			case 0 ://time out
+				 printf("timeout\n");
+				 break;
+			default://success
+			 {
+				//select返回达到就绪态的文件描述符的个数：开始执行数据处理操作
+				int k = 0;	
+				for(;k< _SIZE_;k++)
+				{
+					if(gfds[k]<0)
+					{
+						continue;
+					}
+					 if(gfds[k] == listen_sock && FD_ISSET(gfds[k], &rfds))
+					{
+						struct sockaddr_in clisocket;
+						socklen_t len = sizeof(clisocket);
+						int link_sock = accept(listen_sock,\
+								(struct sockaddr*)&clisocket,&len);
+	
+						if(link_sock < 0)
+						{
+							perror("accept failed");
+							return 6;
+						}
+						
+						printf("client# [ip: %s] [port: %d]",\
+								inet_ntoa(clisocket.sin_addr),clisocket.sin_port);
+						int m = 0;
+						for(;m<_SIZE_;m++)
+						{
+							if(gfds[m] < 0)
+								break;
+						}
+						if(m != _SIZE_)
+						{
+							gfds[m] = link_sock;
+							FD_SET(link_sock,&rfds);
+						}
+						else{
+							close(link_sock);
+							break;
+						}
+					}
+					else if(FD_ISSET(gfds[k],&rfds)) //用来测试描述词组set中相关fd的位是否为真，
+					{//因为selete一直在等待，只要刺激对应的fd，就可以发生对应的操作，所以下面不需要while，
+						
+							char buf[1024];
+							ssize_t s = read(gfds[k],buf,sizeof(buf)-1);
+							if(s > 0)
+							{
+								buf[s] = 0;
+								printf("%s \n",buf);
+							}
+							else if(s ==0)
+							{
+								printf("client quit\n");
+								printf("%d \n",gfds[k]);//当close后 ,gfds[k]保持不变
+								gfds[k] = -1;
+
+								break;//select 是针对某一段时刻的fd的状态
+							}
+							else
+							{
+								perror("read\n ");
+								break;
+							}
+					}
+				}
+	
+			 }
+
+		}
+
+	}
+
+
+
+	return 0;
+}
+
