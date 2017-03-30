@@ -1,0 +1,260 @@
+/*****************************
+# File Name: server.c
+	> Author: admin
+ 	> Create Time 2017年03月20日 星期一 20时14分00秒
+ *********************/
+
+
+#define _GNU_SOURCE 1
+#include<unistd.h>
+#include<arpa/inet.h>
+#include<stdio.h>
+#include<poll.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<string.h>
+
+#define _MAX_NUMS 5
+#define _FD_NUMS_ 6535
+#define _BUF_SIZE 1024
+
+
+struct client_data
+{
+	struct sockaddr_in cli_sock; //客户端套接字
+	char *write_buf;			  //服务器写给客户端的数据
+	char buf[_BUF_SIZE];		 //服务器读取客户端的数据
+};
+
+
+void setnonblocking(int fd)
+{
+	int old_option = fcntl(fd,F_GETFL);
+	int new_option = old_option |O_NONBLOCK;
+	fcntl(fd,F_SETFL,new_option);
+}
+
+
+int mysocket(char* ip,int port)
+{
+	int sock = socket(AF_INET,SOCK_STREAM,0);// 创建服务器监听套接字，绑定服务器监听套接字信息
+	if(sock< 0)
+	{
+		perror("socket");
+		exit(2);
+	}
+
+	int opt = 1;
+	setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
+	
+	struct sockaddr_in server_socket;
+	server_socket.sin_addr.s_addr=inet_addr(ip);
+	server_socket.sin_port =htons(port);
+	server_socket.sin_family = AF_INET;
+	socklen_t len  = sizeof(server_socket);
+	int b_ret = bind(sock,(struct sockaddr*)&server_socket,len);
+	if(b_ret<0)
+	{
+		perror("bind");
+		exit(3);
+	}
+
+	int s_ret = listen(sock,5);
+	if(s_ret<0)
+	{
+		perror("listen");
+		exit(4);
+	}
+
+	return sock;
+}
+int main(int argc,char* argv[])
+{
+	if(argc!=3)
+	{
+		printf("%s [server_ip][server_port]\n",argv[0]);
+		exit(1);
+	}
+	
+	int listen_socket= mysocket(argv[1],atoi(argv[2]));
+
+	/***********************************************/
+
+	//1 为了获取缓冲区的数据，定义的客户端数据结构体
+	struct client_data user_data[_FD_NUMS_]; 
+	struct pollfd  members[_MAX_NUMS+1];
+
+	//2 poll函数数组参数的初始化
+	members[0].fd= listen_socket;
+	members[0].events = POLLIN;
+	members[0].revents = 0;
+	int i = 1;
+	for(;i<_MAX_NUMS+1;i++)
+	{
+		members[i].fd=-1;
+		members[i].events = 0;
+		members[i].revents= 0;
+	}
+	int timeout = -1;
+	int user_counts= 0;
+
+	while(1)
+	{
+		int ret = poll(members,_MAX_NUMS+1,timeout);
+		switch(ret)
+		{
+			case -1:
+				perror("poll");
+				exit(5);
+			case 0:
+				printf("timeout\n");
+				continue;
+			default:
+					{
+						int i = 0;
+						for(;i < _MAX_NUMS+1;i++)
+						{
+							if(!(members[i].revents&POLLIN ) )
+							{
+								continue;
+							}
+							int fd = members[i].fd;
+							short eves = members[i].events;
+							short reves= members[i].revents;
+							if((fd == listen_socket) &&(reves&POLLIN))
+							{
+								struct sockaddr_in clisock;
+								socklen_t len = sizeof(clisock);
+								int link_sock = accept(listen_socket,(struct sockaddr*) &clisock,&len);
+														
+								if(link_sock < 0)
+								{
+									perror("accept");
+									exit(6);
+								}
+								user_counts++;
+								if(user_counts >_MAX_NUMS)
+								{
+									//char* msg = " Link nums has enough !Please Wait... ";
+									printf("Link nums has enough !\n");
+									close(link_sock);
+									continue;
+								}
+								//accept成功，user_count与mem的下标保持同步，user_data为了高效使得link_sock与其下标相同，没必要每次循环得到目标cli_sock，
+								user_data[link_sock].cli_sock = clisock;
+								
+
+								setnonblocking(link_sock);
+								members[user_counts].fd = link_sock;
+								members[user_counts].events = POLLIN|POLLRDHUP|POLLERR;
+								members[user_counts].revents = 0;
+								
+							}						
+							else if((fd!=listen_socket)&&(reves==POLLRDHUP))
+							{
+								printf("%d num client quit\n",i);
+								close(fd);	
+								user_counts--;
+								
+								continue;
+							}
+							else if((fd!=listen_socket)&&(reves == POLLERR))
+							{
+								printf(" %d num POLLERR\n",i);
+								continue;
+							}
+							else if((fd !=listen_socket)&&(reves&POLLIN))
+							{
+								/*
+								 *1. 服务器接收客户端数据
+								 *2. 服务器转发给目标客户端 
+								 **/
+
+								ssize_t _s = read(fd,user_data[fd].buf,sizeof(user_data[fd].buf)-1);
+								if(_s<0)
+								{
+									perror("read");
+									continue;
+								}
+								else if(_s ==0)
+								{
+									printf("client has quited!");
+									user_counts--;
+									close(fd);
+								}
+								user_data[fd].buf[_s] = 0;
+								
+								/*此处是发送给除自己外的所有客户端*/
+								int k = 1;
+								while(k<=user_counts)
+								{
+									if(members[k].fd== fd)
+									{
+										k++;
+										continue;
+									}
+									int index = members[k].fd;
+									user_data[index].write_buf = user_data[fd].buf;
+								//	members[k].events |=~POLLIN;
+								//	members[k].events |=POLLOUT;这两句使得events = -1;
+									members[k].events = POLLOUT;
+									send(members[k].fd,user_data[index].write_buf,\
+											strlen(user_data[index].write_buf),0);
+									members[k].events = POLLIN;
+									k++;
+									
+
+								}
+
+
+							}
+//							else if((fd!=listen_socket)&&(reves&POLLOUT) )
+//							{
+//								//一次性全部写入
+//								int m = 1;
+//								while(m<=user_counts)
+//								{
+//									if(members[m].fd== fd)
+//									{
+//										m++;
+//										continue;
+//									}
+//									int index = members[m].fd;
+//									send(members[m].fd,user_data[index].write_buf,\
+//											strlen(user_data[index].write_buf),0);
+//									user_data[index].write_buf=NULL;
+//
+//									//写完之后需要重新注册mem[m]上的可读事件
+//									//members[m].events |=~POLLIN;
+//									//members[m].events |=POLLOUT; 
+//									 members[m].events = POLLIN;
+//									m++;
+//
+//								}
+//
+//
+//							}
+//
+//
+						}
+
+					}
+		}
+		
+	}
+
+	close(listen_socket);
+
+	return 0;
+}
+
+
+
+
+
+
+
+
+
